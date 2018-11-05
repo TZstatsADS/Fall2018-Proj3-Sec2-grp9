@@ -1,0 +1,183 @@
+---
+title: "Improvement"
+author: "Ruoxi Bai (rb3313)"
+date: "11/5/2018"
+output: pdf_document
+---
+# Preparation
+
+## Environment & Packages
+
+```{r env}
+print(R.version)
+```
+
+```{r check packages, warning=F, message=F}
+if(!require("EBImage")){
+  source("https://bioconductor.org/biocLite.R")
+  biocLite("EBImage")
+}
+if(!require("gbm")){
+  install.packages("gbm")
+}
+if(!require("plyr")){
+  install.packages("plyr")
+}
+if(!require("xgboost")){
+  install.packages("xgboost")
+}
+if(!require("dplyr")){
+  install.packages("dplyr")
+}
+if(!require("snow")){
+  install.packages("snow")
+}
+if(!require("foreach")){
+  install.packages("foreach")
+}
+if(!require("doParallel")){
+  install.packages("doParallel")
+}
+
+library("EBImage")
+library("gbm")
+library("plyr")
+library("xgboost")
+library("dplyr")
+library("plyr")
+require("snow")
+require("foreach")
+library("doParallel")
+```
+
+## Set Up Paths & Set Seed
+
+```{r set}
+set.seed(2018)
+setwd(getwd())
+
+# train paths
+train_dir <- "../data/train_set/"
+train_LR_dir <- paste(train_dir, "LR/", sep="")
+train_HR_dir <- paste(train_dir, "HR/", sep="")
+train_label_path <- paste(train_dir, "label.csv", sep="")
+
+# test paths: might need to be modified later
+test_dir <- "../data/test_set/"
+test_LR_dir <- paste(test_dir, "LR/", sep="")
+test_HR_dir <- paste(test_dir, "HR/", sep="")
+test_label_path <- paste(test_dir, "label.csv", sep="")
+```
+
+## Control Variables
+```{r controls}
+run.cv=TRUE # run cross-validation on the training set
+KK <- 5  # number of CV folds
+run.feature.train=TRUE # process features for training set
+run.test=TRUE # run evaluation on an independent test set
+run.feature.test=TRUE # process features for test set
+```
+
+# Train: One Super Resolution Model for Each Class
+
+**Train a super resolution model for pictures classified by the same label**
+
+```{r feature, warning=F}
+extra_label <- read.csv(train_label_path, colClasses=c("NULL", NA, NA), as.is = T)
+
+# parameters
+n_points = 1000
+xgdepth = seq(3,11,2)
+
+# pre-allocate space for outcome
+labNums = table(extra_label[,2])
+# pics = list(l1 = list(array(NA, c(labNums[1] * n_points, 8, 3)), array(NA, c(labNums[1] * n_points, 4, 3))),
+#             l2 = list(array(NA, c(labNums[2] * n_points, 8, 3)), array(NA, c(labNums[2] * n_points, 4, 3))),
+#             l3 = list(array(NA, c(labNums[3] * n_points, 8, 3)), array(NA, c(labNums[3] * n_points, 4, 3))))
+tm_feature_train <- list() # time used to extract features for each class
+tm_train_xgb = list() # time used to fit model for each class
+fit_train_xgb = list() # the selected trained moedel for each class
+optParams = rep(NA, 3)
+source("../lib/features2.R")
+
+# for each class, train a model
+for(i in 0:2){
+  imgNames = filter(extra_label, Label == i)$Image
+  
+  # extract features
+  if(run.feature.train){
+    tm_feature_train[[i+1]] <- system.time(feat_train_all <- feature2(train_LR_dir, train_HR_dir, n_points, imgNames))
+    feat_train <- feat_train_all$feature
+    label_train <- feat_train_all$label
+  }
+  save(feat_train_all, file=paste0("../output/feature_train",i,".RData"))
+  
+  # load xgboost package based train, test, cv functions
+  source("../lib/xgboost.R")
+  source("../lib/test_xgboost.R")
+  source("../lib/cross_validation_xgb.R")
+  
+  # cross validation
+  if(run.cv){
+    err_cv_xgb <- array(dim=c(length(xgdepth), 2))
+    for(k in 1:length(xgdepth)){
+      cat("k =", k, "\n")
+      err_cv_xgb[k,] <- XGBcv.function(feat_train, label_train, xgdepth[k], KK)
+    }
+    save(err_cv_xgb, file=paste0("../output/err_cv_xgbLAB",i,".RData"))
+  }
+  
+  # visualize cross validation results
+  if(run.cv){
+    tit = paste("[ Label", i, "] Cross Validation Error")
+    y1 = min(err_cv_xgb[,1]) - 2e-4
+    y2 = max(err_cv_xgb[,1]) + 2e-4
+    plot(xgdepth, err_cv_xgb[,1], xlab="Interaction Depth", ylab="CV Error",
+         main=tit, type="n", ylim=c(y1, y2))
+    points(xgdepth, err_cv_xgb[,1], col="blue", pch=16)
+    lines(xgdepth, err_cv_xgb[,1], col="blue")
+    arrows(xgdepth, err_cv_xgb[,1]-err_cv_xgb[,2], xgdepth, err_cv_xgb[,1]+err_cv_xgb[,2], 
+           length=0.1, angle=90, code=3)
+  }
+  
+  # choose the optimal parameter
+  if(run.cv){
+  optParams[i+1] <- xgdepth[which.min(err_cv_xgb[,1])]
+  }
+  par_best_xgb <- list(depth = optParams[i+1])
+  
+  # fit the train model using selected parameter
+  
+  tm_train_xgb[[i+1]] <- system.time(fit_train_xgb[[i+1]] <- XGBTr(feat_train, label_train, par_best_xgb))
+  save(fit_train_xgb, file="../output/fit_train_xgb.RData")
+  cat("[ Label", i, "] Time for constructing training features =", tm_feature_train[[i+1]][1], "s \n")
+  cat("[ Label", i, "] Time for training model =", tm_train_xgb[[i+1]][1], "s \n")
+}
+
+save(tm_feature_train, file=paste0("../output/timeFeatureTrain.RData"))
+save(tm_train_xgb, file=paste0("../output/timeXGBModelTrain.RData"))
+save(fit_train_xgb, file=paste0("../output/XGBModelTrain.RData"))
+save(optParams, file=paste0("../output/optParams.RData"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
