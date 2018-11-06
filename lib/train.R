@@ -3,14 +3,14 @@
 #########################################################
 
 ### Author: Chengliang Tang
-### Project 3
 
+library(dplyr)
 library(foreach)
 library(doParallel)
-cl <- makeCluster(4)
+library(snow)
+cl <- makeCluster(detectCores(logical = F))
 registerDoParallel(cl)
-
-train<- function(dat_train, label_train, par=NULL){
+train<- function(dat_train, label_train, par=NULL, shrinkage=NULL){
   ### creat model list
   modelList <- list()
   
@@ -20,6 +20,12 @@ train<- function(dat_train, label_train, par=NULL){
   } else {
     depth <- par$depth
   }
+  if(is.null(shrinkage)){
+    sk<- 0.01
+  } else {
+    sk <- shrinkage$sk_value
+  }
+  
   k1=rep(1:4,3)
   k2=rep(1:3,each=4)
   modelList<-foreach(i=1:12,.packages="gbm") %dopar%{ 
@@ -31,6 +37,7 @@ train<- function(dat_train, label_train, par=NULL){
                     distribution="gaussian",
                     interaction.depth=depth, 
                     bag.fraction = 0.5,
+                    shrinkage = sk,
                     verbose=FALSE)
     list(fit=fit_gbm,iter=gbm.perf(fit_gbm, method="OOB", plot.it = FALSE))
   }
