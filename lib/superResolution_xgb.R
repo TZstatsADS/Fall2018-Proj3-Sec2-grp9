@@ -7,46 +7,7 @@
 library(dplyr)
 library(foreach)
 
-zero_pad2 <- function(array3)
-{
-  dim1 <- dim(array3)[1]
-  dim2 <- dim(array3)[2]
-  new_array <- array(0,c(dim1+4, dim2+4, 3))
-  for (i in 1:3)
-  {
-    new_array[3:(dim1+2), 3:(dim2+2),i] <- array3[,,i]
-  }
-  return(new_array)
-}
 
-
-findCNeighb <- function(ind,mat)
-{
-  s=ind[1];t=ind[2]
-  center=mat[s,t]
-  neigh1 <- mat[s-1, t-1] - mat[s, t]
-  neigh2 <- mat[s-1, t] - mat[s, t]
-  neigh3 <- mat[s-1, t+1] - mat[s, t]
-  neigh4 <- mat[s, t-1] - mat[s,t]
-  neigh5 <- mat[s, t+1] - mat[s , t]
-  neigh6 <- mat[s+1, t-1] - mat[s , t]
-  neigh7 <- mat[s+1, t] - mat[s , t]
-  neigh8 <- mat[s+1, t+1] - mat[s , t]
-  return(c(center,neigh1, neigh2, neigh3, neigh4, neigh5, neigh6, neigh7, neigh8))}
-
-
-findNeighb <- function(ind,mat)
-{
-  s=ind[1];t=ind[2]
-  neigh1 <- mat[s-1, t-1] - mat[s, t]
-  neigh2 <- mat[s-1, t] - mat[s, t]
-  neigh3 <- mat[s-1, t+1] - mat[s, t]
-  neigh4 <- mat[s, t-1] - mat[s,t]
-  neigh5 <- mat[s, t+1] - mat[s , t]
-  neigh6 <- mat[s+1, t-1] - mat[s , t]
-  neigh7 <- mat[s+1, t] - mat[s , t]
-  neigh8 <- mat[s+1, t+1] - mat[s , t]
-  return(c(neigh1, neigh2, neigh3, neigh4, neigh5, neigh6, neigh7, neigh8))}
 
 reallocate_single <- function(index, row_rep, col_rep)
 {
@@ -77,39 +38,52 @@ reallocate <- function(preArray, lh, lw){
 
 
 
-XGBsuperResolution <- function(LR_dir, HR_dir, modelList){
+XGBsuperResolution <- function(LR_dir, SR_dir, modelList){
+  
+  ### Construct high-resolution images from low-resolution images with trained predictor
+  
+  ### Input: a path for low-resolution images + a path for high-resolution images 
+  ###        + a list for predictors
+  
+  ### load libraries
   library("EBImage")
-# n_files <- length(imgs)
   n_files <- length(list.files(LR_dir))
+  #n_files <- length(imgs)
+  ### read LR/HR image pairs
+  tm_feature=numeric(5)
   for(i in 1:n_files){
-#    t1 = proc.time()
+    t1 = proc.time()
     imgLR <- readImage(paste0(LR_dir,  "img", "_", sprintf("%04d", i), ".jpg"))
-    pathHR <- paste0(HR_dir, "img", "_", sprintf("%04d", i), ".jpg")
-    featMat <- array(NA, c(dim(imgLR)[1] * dim(imgLR)[2], 25, 3))
-    x <- dim(imgLR)[1]
-    y <- dim(imgLR)[2]
-    imgLR <- zero_pad2(imgLR)
-    inds <- expand.grid(3:(dim(imgLR)[2]-2), 3:(dim(imgLR)[1]-2))[,2:1] %>% 
-      as.matrix()
+    pathSR <- paste0(SR_dir,  "img", "_", sprintf("%04d", i), ".jpg")
+    featMat <- array(NA, c(dim(imgLR)[1] * dim(imgLR)[2], 8, 3))
+
+    
+    imgLR_zero <- zero_pad(imgLR)
+    inds <- expand.grid(2:(dim(imgLR_zero)[1]-1), 2:(dim(imgLR_zero)[2]-1)) %>% as.matrix()
+    ### step 1. for each pixel and each channel in imgLR:
+    ###           save (the neighbor 24 pixels - central pixel) in featMat
+    ###           tips: padding zeros for boundary points
     for (k in 1:3) {
-      featMat[,,k] <- apply(inds, 1, findCNeighb5x5,imgLR[,,k] )%>%t()
+      featMat[,,k] <- apply(inds, 1, findNeighb,imgLR_zero[,,k] )%>%t()
+      
     }
-#    t2 = proc.time()
-#    tm_feature = tm_feature + t2-t1
+    t2 = proc.time()
+    tm_feature = tm_feature + t2-t1
+    
+    ### step 2. apply the modelList over featMat
     predMat <- XGBtest(modelList, featMat)
-    #prearray <- array(predMat, c(dim(imgLR)[1]*2,dim(imgLR)[2]*2,3))
-    recover <- reallocate(predMat, x, y)
-    img <- Image(recover, colormode=Color)
-    writeImage(img,pathHR)
+    ### step 3. recover high-resolution from predMat and save in HR_dir
+    imageArr <- array(NA, c(dim(predMat)[1],4,3))
+    imageArr_central<- as.numeric(imgLR)
+    for (i in 1:3 ){
+      imageArr[,,i] <- predMat[,,i] +imageArr_central[((i-1)*dim(predMat)[1]+1):(dim(predMat)[1]*i)]
     }
+    
+    recover <-  Image(transpose(reallocate(imageArr, dim(imgLR)[2], dim(imgLR)[1])), colormode = Color)
+    writeImage(recover, pathSR)
+  }
+  return(tm_feature)
 }
 
 
-##############run##################
-# LR_dir <- 'C:/Users/wang1/Documents/GR 5243/Fall2018-Proj3-Sec2-grp9 xgb/data/test_set/LR/'
-# HR_dir <- 'C:/Users/wang1/Documents/GR 5243/Fall2018-Proj3-Sec2-grp9 xgb/data/test_set/HR/'
-# 
-# st_super <- system.time(XGBsuperResolution(LR_dir, HR_dir, modelList))
-# st_super
-# 
-# cv.error_1 <- mean((pred - test.label)^2) 
+
