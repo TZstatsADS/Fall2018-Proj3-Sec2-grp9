@@ -9,12 +9,15 @@ Post your title, team members, project abstract and a contribution statement in 
 Below is an example. If no contribution statement is provided, we will insert a default statement that goes "**All team members contributed equally in all stages of this project. All team members approve our work presented in this GitHub repository including this contributions statement**. "
 
 ---
-Sample project README statement.
 
-Project xxx
+Project 3
 
-Team members: Avi Bond, Comma Deed, En Funn, Gem Hon
+Team members: Chenzhong Zhong, Ruoxi Bai, Xin Jin,Yujia Wang, Yan Wang
 
-Summary: In this project, we developed a new method and improved the classification accuracy for images of cats and dogs to 99.9%
+Summary: Tasked with increasing picture resolution in this project, we trained a GBM model as the baseline , and an Xgboost with modified data and parameters as the improvement, successfully increasing the PSNR.
 
-[Contribution Statement] AB, CD, EF and GH designed the study. AB and CD developed baseline classification model for evaluation. EF and GH explored feature engineering for improving the baseline model. AB, EF and GH discussed and designed the model evaluation protocol. CD carried out the computation for model evaluation. All team members contributed to the GitHub repository and prepared the presentation. All team members approve our work presented in our GitHub repository including this contribution statement.
+[Contribution Statement] Chenzhong Zhong did feature extraction, training, super resolution, and PSNR part of both models.
+                         Ruoxi Bai developed the Xgboost model as an improvement, including tuning parameters with cross validation.
+                         Xin Jin did super resolution for both models, and tuning parameters with cross validation for the baseline model.
+                         Yujia Wang did super resolution part for both models, and cross validation for the Xgboost model.
+                         Yan Wang partipated in group meetings.
